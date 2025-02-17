@@ -2,48 +2,14 @@ package virtualworkspace
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
 
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
-	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 )
-
-func WithClusterNameIndex(opts *cache.Options) cache.Options {
-	old := opts.NewInformer
-	opts.NewInformer = func(watcher toolscache.ListerWatcher, object apiruntime.Object, duration time.Duration, indexers toolscache.Indexers) toolscache.SharedIndexInformer {
-		var inf toolscache.SharedIndexInformer
-		if old != nil {
-			inf = old(watcher, object, duration, indexers)
-		} else {
-			inf = toolscache.NewSharedIndexInformer(watcher, object, duration, indexers)
-		}
-		if err := inf.AddIndexers(toolscache.Indexers{
-			ClusterNameIndex: func(obj any) ([]string, error) {
-				o := obj.(client.Object)
-				return []string{
-					fmt.Sprintf("%s/%s", o.GetAnnotations()[clusterAnnotation], o.GetName()),
-				}, nil
-			},
-			ClusterIndex: func(obj any) ([]string, error) {
-				o := obj.(client.Object)
-				return []string{o.GetAnnotations()[clusterAnnotation]}, nil
-			},
-		}); err != nil {
-			utilruntime.HandleError(fmt.Errorf("unable to add cluster name indexers: %w", err))
-		}
-		return inf
-	}
-
-	return *opts
-}
 
 /*
 // WithClusterNameIndex adds indexers for cluster name and namespace.
@@ -78,13 +44,14 @@ func WithClusterNameIndex() cluster.Option {
 }
 */
 
-func newWorkspacedCluster(cfg *rest.Config, clusterName string, baseCluster cluster.Cluster) (*workspacedCluster, error) {
+func newWorkspacedCluster(cfg *rest.Config, clusterName string, baseCluster cluster.Cluster, infGetter sharedInformerGetter) (*workspacedCluster, error) {
 	cfg = rest.CopyConfig(cfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + clusterName
 
 	c := &workspacedCache{
 		clusterName: clusterName,
 		Cache:       baseCluster.GetCache(),
+		infGetter:   infGetter,
 	}
 
 	client, err := client.New(cfg, client.Options{

@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/kontext"
 )
 
 const (
@@ -27,13 +32,76 @@ var _ cache.Cache = &workspacedCache{}
 type workspacedCache struct {
 	clusterName string
 	cache.Cache
+	infGetter sharedInformerGetter
 }
 
 // Get returns a single object from the cache.
 func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if err := c.Cache.Get(ctx, key, obj, opts...); err != nil {
+	inf, scope, found, err := c.infGetter(obj)
+	if err != nil {
+		return fmt.Errorf("failed to get informer for %T %s: %w", obj, obj.GetObjectKind().GroupVersionKind(), err)
+	}
+	if !found {
+		return fmt.Errorf("no informer found for %T %s", obj, obj.GetObjectKind().GroupVersionKind())
+	}
+	c.Cache.List(ctx, obj, client.MatchingFields{})
+
+	if c.scopeName == apimeta.RESTScopeNameRoot {
+		key.Namespace = ""
+	}
+	storeKey := objectKeyToStoreKey(key)
+
+	// create cluster-aware key for KCP
+	_, isClusterAware := c.indexer.GetIndexers()[kcpcache.ClusterAndNamespaceIndexName]
+	clusterName, _ := kontext.ClusterFrom(ctx)
+	if isClusterAware && clusterName.Empty() {
+		return fmt.Errorf("cluster-aware cache requires a cluster in context")
+	}
+	if isClusterAware {
+		storeKey = clusterName.String() + "|" + storeKey
+	}
+
+	// Lookup the object from the indexer cache
+	obj, exists, err := c.indexer.GetByKey(storeKey)
+	if err != nil {
 		return err
 	}
+
+	// Not found, return an error
+	if !exists {
+		return apierrors.NewNotFound(schema.GroupResource{
+			Group: c.groupVersionKind.Group,
+			// Resource gets set as Kind in the error so this is fine
+			Resource: c.groupVersionKind.Kind,
+		}, key.Name)
+	}
+
+	// Verify the result is a runtime.Object
+	if _, isObj := obj.(runtime.Object); !isObj {
+		// This should never happen
+		return fmt.Errorf("cache contained %T, which is not an Object", obj)
+	}
+
+	if c.disableDeepCopy {
+		// skip deep copy which might be unsafe
+		// you must DeepCopy any object before mutating it outside
+	} else {
+		// deep copy to avoid mutating cache
+		obj = obj.(runtime.Object).DeepCopyObject()
+	}
+
+	// Copy the value of the item in the cache to the returned value
+	// TODO(directxman12): this is a terrible hack, pls fix (we should have deepcopyinto)
+	outVal := reflect.ValueOf(out)
+	objVal := reflect.ValueOf(obj)
+	if !objVal.Type().AssignableTo(outVal.Type()) {
+		return fmt.Errorf("cache had type %s, but %s was asked for", objVal.Type(), outVal.Type())
+	}
+	reflect.Indirect(outVal).Set(reflect.Indirect(objVal))
+	if !c.disableDeepCopy {
+		out.GetObjectKind().SetGroupVersionKind(c.groupVersionKind)
+	}
+
 	return nil
 }
 

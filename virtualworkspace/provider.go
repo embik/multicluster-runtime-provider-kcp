@@ -26,10 +26,11 @@ var _ multicluster.Provider = &Provider{}
 type Provider struct {
 	config *rest.Config
 
-	cluster cluster.Cluster
-	cache   cache.Cache
+	cluster   cluster.Cluster
+	infGetter sharedInformerGetter
 
-	log       logr.Logger
+	log logr.Logger
+
 	lock      sync.RWMutex
 	clusters  map[string]cluster.Cluster
 	cancelFns map[string]context.CancelFunc
@@ -37,19 +38,19 @@ type Provider struct {
 
 // New creates a new namespace provider.
 func New(restConfig *rest.Config) (*Provider, error) {
-
 	config := rest.CopyConfig(restConfig)
 	if !strings.HasSuffix(config.Host, "/clusters/*") {
 		config.Host += "/clusters/*"
 	}
 
-	c, err := cache.New(config, WithClusterNameIndex(&cache.Options{}))
-	if err != nil {
-		return nil, err
-	}
-
+	var infGetter sharedInformerGetter
 	withGlobalSettings := func(opts *cluster.Options) {
 		opts.NewCache = func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
+			opts, infGetter = withClusterNameIndex(opts)
+			c, err := cache.New(config, opts)
+			if err != nil {
+				return nil, err
+			}
 			return &workspaceScopeableCache{Cache: c}, nil
 		}
 	}
@@ -60,9 +61,9 @@ func New(restConfig *rest.Config) (*Provider, error) {
 	}
 
 	return &Provider{
-		config:  restConfig,
-		cluster: wildcardCluster,
-		cache:   c,
+		config:    restConfig,
+		cluster:   wildcardCluster,
+		infGetter: infGetter,
 
 		log: log.Log.WithName("kcp-virtualworkspace-cluster-provider"),
 
@@ -74,7 +75,7 @@ func New(restConfig *rest.Config) (*Provider, error) {
 // Run starts the provider and blocks.
 func (p *Provider) Run(ctx context.Context, mgr mcmanager.Manager) error {
 	go func() {
-		if err := p.cache.Start(ctx); err != nil {
+		if err := p.cluster.Start(ctx); err != nil {
 			p.log.Error(err, "failed to start wildcard cache")
 		}
 	}()
@@ -88,7 +89,7 @@ func (p *Provider) Run(ctx context.Context, mgr mcmanager.Manager) error {
 	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if !p.cache.WaitForCacheSync(syncCtx) {
+	if !p.cluster.GetCache().WaitForCacheSync(syncCtx) {
 		return fmt.Errorf("failed to sync wildcard cache")
 	}
 
@@ -112,7 +113,7 @@ func (p *Provider) Get(ctx context.Context, clusterName string) (cluster.Cluster
 		return cl, nil
 	}
 
-	cl, err := newWorkspacedCluster(p.config, clusterName, p.cluster)
+	cl, err := newWorkspacedCluster(p.config, clusterName, p.cluster, p.infGetter)
 	if err != nil {
 		return nil, err
 	}
