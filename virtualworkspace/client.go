@@ -3,6 +3,8 @@ package virtualworkspace
 import (
 	"context"
 
+	"github.com/kcp-dev/logicalcluster/v3"
+	"github.com/kcp-dev/multicluster-runtime-provider/internal/kontext"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -16,7 +18,7 @@ type workspacedClient struct {
 
 // Get returns a single object.
 func (n *workspacedClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	return n.Client.Get(ctx, key, obj, opts...)
+	return n.Client.Get(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), key, obj, opts...)
 }
 
 // List returns a list of objects.
@@ -25,7 +27,7 @@ func (n *workspacedClient) List(ctx context.Context, list client.ObjectList, opt
 	for _, o := range opts {
 		o.ApplyToList(&copts)
 	}
-	if err := n.Client.List(ctx, list, opts...); err != nil {
+	if err := n.Client.List(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), list, opts...); err != nil {
 		return err
 	}
 
@@ -34,17 +36,17 @@ func (n *workspacedClient) List(ctx context.Context, list client.ObjectList, opt
 
 // Create creates a new object.
 func (n *workspacedClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	return n.Client.Create(ctx, obj, opts...)
+	return n.Client.Create(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), obj, opts...)
 }
 
 // Delete deletes an object.
 func (n *workspacedClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
-	return n.Client.Delete(ctx, obj, opts...)
+	return n.Client.Delete(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), obj, opts...)
 }
 
 // Update updates an object.
 func (n *workspacedClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
-	return n.Client.Update(ctx, obj, opts...)
+	return n.Client.Update(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), obj, opts...)
 }
 
 // Patch patches an object.
@@ -56,7 +58,7 @@ func (n *workspacedClient) Patch(ctx context.Context, obj client.Object, patch c
 
 // DeleteAllOf deletes all objects of the given type.
 func (n *workspacedClient) DeleteAllOf(ctx context.Context, obj client.Object, opts ...client.DeleteAllOfOption) error {
-	return n.Client.DeleteAllOf(ctx, obj, opts...)
+	return n.Client.DeleteAllOf(kontext.WithCluster(ctx, logicalcluster.Name(n.clusterName)), obj, opts...)
 }
 
 // Status returns a subresource writer.
@@ -80,17 +82,17 @@ type subResourceWorkspacedClient struct {
 
 // Get returns a single object from a subresource.
 func (s subResourceWorkspacedClient) Get(ctx context.Context, obj client.Object, subResource client.Object, opts ...client.SubResourceGetOption) error {
-	return s.client.Get(ctx, obj, subResource, opts...)
+	return s.client.Get(kontext.WithCluster(ctx, logicalcluster.Name(s.clusterName)), obj, subResource, opts...)
 }
 
 // Create creates a new object in a subresource.
 func (s subResourceWorkspacedClient) Create(ctx context.Context, obj client.Object, subResource client.Object, opts ...client.SubResourceCreateOption) error {
-	return s.client.Create(ctx, obj, subResource, opts...)
+	return s.client.Create(kontext.WithCluster(ctx, logicalcluster.Name(s.clusterName)), obj, subResource, opts...)
 }
 
 // Update updates an object in a subresource.
 func (s subResourceWorkspacedClient) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	return s.client.Update(ctx, obj, opts...)
+	return s.client.Update(kontext.WithCluster(ctx, logicalcluster.Name(s.clusterName)), obj, opts...)
 }
 
 // Patch patches an object in a subresource.

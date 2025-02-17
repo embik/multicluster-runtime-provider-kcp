@@ -109,12 +109,16 @@ func main() {
 					return reconcile.Result{}, nil
 				}
 
-				log.Info("Reconciling Secret", "ns", secret.GetNamespace(), "name", secret.Name, "uuid", secret.UID)
+				log.Info("Reconciling Secret", "ns", secret.GetNamespace(), "name", secret.Name, "uid", secret.UID)
 
 				secrets := &corev1.SecretList{}
 				if err := client.List(ctx, secrets); err != nil {
 					log.Error(err, "failed to list secrets in same cluster")
 					return reconcile.Result{}, err
+				}
+
+				for _, s := range secrets.Items {
+					log.Info("Found Secret", "ns", s.GetNamespace(), "name", s.Name, "uid", s.UID)
 				}
 
 				cm := &corev1.ConfigMap{

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/kcp-dev/logicalcluster/v3"
 	mcreconcile "github.com/multicluster-runtime/multicluster-runtime/pkg/reconcile"
 )
 
@@ -47,7 +48,7 @@ func (e *TypedEnqueueRequestForObject[T]) Create(ctx context.Context, evt event.
 		return
 	}
 	q.Add(mcreconcile.Request{
-		ClusterName: evt.Object.GetAnnotations()["kcp.io/cluster"],
+		ClusterName: string(logicalcluster.From(evt.Object)),
 		Request: reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      evt.Object.GetName(),
@@ -61,7 +62,7 @@ func (e *TypedEnqueueRequestForObject[T]) Update(ctx context.Context, evt event.
 	switch {
 	case !isNil(evt.ObjectNew):
 		q.Add(mcreconcile.Request{
-			ClusterName: evt.ObjectNew.GetAnnotations()["kcp.io/cluster"],
+			ClusterName: string(logicalcluster.From(evt.ObjectNew)),
 			Request: reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      evt.ObjectNew.GetName(),
@@ -70,7 +71,7 @@ func (e *TypedEnqueueRequestForObject[T]) Update(ctx context.Context, evt event.
 			}})
 	case !isNil(evt.ObjectOld):
 		q.Add(mcreconcile.Request{
-			ClusterName: evt.ObjectOld.GetAnnotations()["kcp.io/cluster"],
+			ClusterName: string(logicalcluster.From(evt.ObjectOld)),
 			Request: reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      evt.ObjectOld.GetName(),
@@ -87,7 +88,7 @@ func (e *TypedEnqueueRequestForObject[T]) Delete(ctx context.Context, evt event.
 		return
 	}
 	q.Add(mcreconcile.Request{
-		ClusterName: evt.Object.GetAnnotations()["kcp.io/cluster"],
+		ClusterName: string(logicalcluster.From(evt.Object)),
 		Request: reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      evt.Object.GetName(),
@@ -102,7 +103,7 @@ func (e *TypedEnqueueRequestForObject[T]) Generic(ctx context.Context, evt event
 		return
 	}
 	q.Add(mcreconcile.Request{
-		ClusterName: evt.Object.GetAnnotations()["kcp.io/cluster"],
+		ClusterName: string(logicalcluster.From(evt.Object)),
 		Request: reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      evt.Object.GetName(),
