@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
+	//"strconv"
 
 	"github.com/spf13/pflag"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	//v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -109,7 +109,7 @@ func main() {
 					return reconcile.Result{}, nil
 				}
 
-				log.Info("Reconciling Secret", "ns", secret.GetNamespace(), "name", secret.Name, "uuid", secret.UID)
+				log.Info("Reconciling Secret", "ns", secret.GetNamespace(), "name", secret.Name, "uid", secret.UID)
 
 				secrets := &corev1.SecretList{}
 				if err := client.List(ctx, secrets); err != nil {
@@ -117,27 +117,33 @@ func main() {
 					return reconcile.Result{}, err
 				}
 
-				cm := &corev1.ConfigMap{
-					ObjectMeta: v1.ObjectMeta{
-						Name:      req.Name,
-						Namespace: req.Namespace,
-					},
+				for _, s := range secrets.Items {
+					log.Info("Found Secret", "ns", s.GetNamespace(), "name", s.Name, "uid", s.UID)
 				}
 
-				res, err := ctrl.CreateOrUpdate(ctx, client, cm, func() error {
-					if cm.Data == nil {
-						cm.Data = make(map[string]string)
+				/*
+					cm := &corev1.ConfigMap{
+						ObjectMeta: v1.ObjectMeta{
+							Name:      req.Name,
+							Namespace: req.Namespace,
+						},
 					}
 
-					cm.Data["secrets"] = strconv.Itoa(len(secrets.Items))
+					res, err := ctrl.CreateOrUpdate(ctx, client, cm, func() error {
+						if cm.Data == nil {
+							cm.Data = make(map[string]string)
+						}
 
-					return nil
-				})
-				if err != nil {
-					return reconcile.Result{}, err
-				}
+						cm.Data["secrets"] = strconv.Itoa(len(secrets.Items))
 
-				log.Info("Reconciled child ConfigMap", "result", res)
+						return nil
+					})
+					if err != nil {
+						return reconcile.Result{}, err
+					}
+
+					log.Info("Reconciled child ConfigMap", "result", res)
+				*/
 
 				return reconcile.Result{}, nil
 			},

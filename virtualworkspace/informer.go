@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
-type sharedInformerGetter func(obj apiruntime.Object) (*toolscache.SharedIndexInformer, apimeta.RESTScopeName, bool, error)
+type sharedInformerGetter func(obj apiruntime.Object) (toolscache.SharedIndexInformer, apimeta.RESTScopeName, schema.GroupVersionKind, bool, error)
 
 func withClusterNameIndex(opts cache.Options) (cache.Options, sharedInformerGetter) {
 	old := opts.NewInformer
@@ -65,23 +65,26 @@ func withClusterNameIndex(opts cache.Options) (cache.Options, sharedInformerGett
 		return inf
 	}
 
-	return opts, func(obj apiruntime.Object) (*toolscache.SharedIndexInformer, apimeta.RESTScopeName, bool, error) {
+	return opts, func(obj apiruntime.Object) (toolscache.SharedIndexInformer, apimeta.RESTScopeName, schema.GroupVersionKind, bool, error) {
 		gvk, err := apiutil.GVKForObject(obj, opts.Scheme)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", schema.GroupVersionKind{}, false, err
 		}
 
 		mapping, err := opts.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", schema.GroupVersionKind{}, false, err
 		}
 
 		infs := tracker.informersByType(obj)
 		tracker.lock.RLock()
 		inf, ok := infs[gvk]
 		tracker.lock.RUnlock()
+		if !ok || inf == nil {
+			return nil, "", schema.GroupVersionKind{}, false, fmt.Errorf("informer not found")
+		}
 
-		return inf, mapping.Scope.Name(), ok, nil
+		return *inf, mapping.Scope.Name(), gvk, ok, nil
 	}
 }
 

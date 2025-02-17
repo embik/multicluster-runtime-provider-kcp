@@ -8,13 +8,11 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/kontext"
 )
 
 const (
@@ -33,51 +31,135 @@ type workspacedCache struct {
 	clusterName string
 	cache.Cache
 	infGetter sharedInformerGetter
+
+	disableDeepCopy bool
 }
 
-// Get returns a single object from the cache.
-func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	inf, scope, found, err := c.infGetter(obj)
+/*
+// IndexField adds an indexer to the underlying informer, using extractValue function to get
+// value(s) from the given field. This index can then be used by passing a field selector
+// to List. For one-to-one compatibility with "normal" field selectors, only return one value.
+// The values may be anything. They will automatically be prefixed with the namespace of the
+// given object, if present. The objects passed are guaranteed to be objects of the correct type.
+func (ic *workspacedCache) IndexField(ctx context.Context, obj client.Object, field string, extractValue client.IndexerFunc) error {
+	informer, err := ic.GetInformer(ctx, obj)
 	if err != nil {
-		return fmt.Errorf("failed to get informer for %T %s: %w", obj, obj.GetObjectKind().GroupVersionKind(), err)
+		return err
+	}
+	return ic.indexByField(informer, field, extractValue)
+}
+
+func (ic *workspacedCache) indexByField(informer cache.Informer, field string, extractValue client.IndexerFunc) error {
+	indexFunc := func(objRaw interface{}) ([]string, error) {
+		// TODO(directxman12): check if this is the correct type?
+		obj, isObj := objRaw.(client.Object)
+		if !isObj {
+			return nil, fmt.Errorf("object of type %T is not an Object", objRaw)
+		}
+		meta, err := apimeta.Accessor(obj)
+		if err != nil {
+			return nil, err
+		}
+		ns := meta.GetNamespace()
+
+		keyFunc := func(ns, val string) string {
+			return KeyToClusteredKey(ic.clusterName, ns, val)
+		}
+
+		rawVals := extractValue(obj)
+		var vals []string
+		if ns == "" {
+			// if we're not doubling the keys for the namespaced case, just create a new slice with same length
+			vals = make([]string, len(rawVals))
+		} else {
+			// if we need to add non-namespaced versions too, double the length
+			vals = make([]string, len(rawVals)*2)
+		}
+
+		for i, rawVal := range rawVals {
+			// save a namespaced variant, so that we can ask
+			// "what are all the object matching a given index *in a given namespace*"
+			vals[i] = keyFunc(ns, rawVal)
+			if ns != "" {
+				// if we have a namespace, also inject a special index key for listing
+				// regardless of the object namespace
+				vals[i+len(rawVals)] = keyFunc("", rawVal)
+			}
+		}
+
+		return vals, nil
+	}
+
+	return informer.AddIndexers(toolscache.Indexers{FieldIndexName(field): indexFunc})
+}
+
+// KeyToClusteredKey prefixes the given index key with a cluster name
+// for use in field selector indexes.
+func KeyToClusteredKey(clusterName string, ns string, baseKey string) string {
+	return clusterName + "|" + KeyToNamespacedKey(ns, baseKey)
+}
+
+// KeyToNamespacedKey prefixes the given index key with a namespace
+// for use in field selector indexes.
+func KeyToNamespacedKey(ns string, baseKey string) string {
+	if ns != "" {
+		return ns + "/" + baseKey
+	}
+	return allNamespacesNamespace + "/" + baseKey
+}
+
+// allNamespacesNamespace is used as the "namespace" when we want to list across all namespaces.
+const allNamespacesNamespace = "__all_namespaces"
+
+// FieldIndexName constructs the name of the index over the given field,
+// for use with an indexer.
+func FieldIndexName(field string) string {
+	return "field:" + field
+}
+*/
+/*
+func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return c.Cache.Get(ctx, key, obj, opts...)
+}
+*/
+
+// Get returns a single object from the cache.
+func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, out client.Object, opts ...client.GetOption) error {
+	inf, _, gvk, found, err := c.infGetter(out)
+	if err != nil {
+		return fmt.Errorf("failed to get informer for %T %s: %w", out, out.GetObjectKind().GroupVersionKind(), err)
 	}
 	if !found {
-		return fmt.Errorf("no informer found for %T %s", obj, obj.GetObjectKind().GroupVersionKind())
+		return fmt.Errorf("no informer found for %T %s", out, out.GetObjectKind().GroupVersionKind())
 	}
-	c.Cache.List(ctx, obj, client.MatchingFields{})
 
-	if c.scopeName == apimeta.RESTScopeNameRoot {
-		key.Namespace = ""
-	}
 	storeKey := objectKeyToStoreKey(key)
 
 	// create cluster-aware key for KCP
-	_, isClusterAware := c.indexer.GetIndexers()[kcpcache.ClusterAndNamespaceIndexName]
-	clusterName, _ := kontext.ClusterFrom(ctx)
-	if isClusterAware && clusterName.Empty() {
-		return fmt.Errorf("cluster-aware cache requires a cluster in context")
-	}
-	if isClusterAware {
-		storeKey = clusterName.String() + "|" + storeKey
-	}
+	/*
+		_, isClusterAware := inf.GetIndexer().GetIndexers()[ClusterNameIndex]
+		if isClusterAware && c.clusterName == "" {
+			return fmt.Errorf("cluster-aware cache requires a cluster")
+		}
+		if isClusterAware {
+			storeKey = c.clusterName + "/" + storeKey
+		}
+	*/
 
 	// Lookup the object from the indexer cache
-	obj, exists, err := c.indexer.GetByKey(storeKey)
+	o, exists, err := inf.GetIndexer().GetByKey(storeKey)
 	if err != nil {
 		return err
 	}
 
 	// Not found, return an error
 	if !exists {
-		return apierrors.NewNotFound(schema.GroupResource{
-			Group: c.groupVersionKind.Group,
-			// Resource gets set as Kind in the error so this is fine
-			Resource: c.groupVersionKind.Kind,
-		}, key.Name)
+		return apierrors.NewNotFound(schema.GroupResource{Group: gvk.Group}, key.Name)
 	}
 
 	// Verify the result is a runtime.Object
-	if _, isObj := obj.(runtime.Object); !isObj {
+	obj, isObj := o.(runtime.Object)
+	if !isObj {
 		// This should never happen
 		return fmt.Errorf("cache contained %T, which is not an Object", obj)
 	}
@@ -87,7 +169,7 @@ func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, obj cli
 		// you must DeepCopy any object before mutating it outside
 	} else {
 		// deep copy to avoid mutating cache
-		obj = obj.(runtime.Object).DeepCopyObject()
+		obj = obj.DeepCopyObject()
 	}
 
 	// Copy the value of the item in the cache to the returned value
@@ -99,24 +181,22 @@ func (c *workspacedCache) Get(ctx context.Context, key client.ObjectKey, obj cli
 	}
 	reflect.Indirect(outVal).Set(reflect.Indirect(objVal))
 	if !c.disableDeepCopy {
-		out.GetObjectKind().SetGroupVersionKind(c.groupVersionKind)
+		out.GetObjectKind().SetGroupVersionKind(gvk)
 	}
 
 	return nil
 }
 
+func objectKeyToStoreKey(k client.ObjectKey) string {
+	if k.Namespace == "" {
+		return k.Name
+	}
+	return k.Namespace + "/" + k.Name
+}
+
 // List returns a list of objects from the cache.
 func (c *workspacedCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	var listOpts client.ListOptions
-	for _, o := range opts {
-		o.ApplyToList(&listOpts)
-	}
-
-	if err := c.Cache.List(ctx, list, opts...); err != nil {
-		return err
-	}
-
-	return nil
+	return c.Cache.List(ctx, list, opts...)
 }
 
 // GetInformer returns an informer for the given object kind.
@@ -228,7 +308,6 @@ func (f *workspaceScopeableCache) IndexField(ctx context.Context, obj client.Obj
 		withCluster := make([]string, len(keys)*2)
 		for i, key := range keys {
 			withCluster[i] = fmt.Sprintf("%s/%s", obj.GetAnnotations()[clusterAnnotation], key)
-			withCluster[i+len(keys)] = fmt.Sprintf("*/%s", key)
 		}
 		return withCluster
 	})
@@ -236,5 +315,5 @@ func (f *workspaceScopeableCache) IndexField(ctx context.Context, obj client.Obj
 
 // Start starts the cache.
 func (f *workspaceScopeableCache) Start(ctx context.Context) error {
-	return nil
+	return f.Cache.Start(ctx)
 }

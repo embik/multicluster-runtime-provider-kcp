@@ -75,11 +75,6 @@ func New(restConfig *rest.Config) (*Provider, error) {
 // Run starts the provider and blocks.
 func (p *Provider) Run(ctx context.Context, mgr mcmanager.Manager) error {
 	go func() {
-		if err := p.cluster.Start(ctx); err != nil {
-			p.log.Error(err, "failed to start wildcard cache")
-		}
-	}()
-	go func() {
 		p.log.Info("Starting wildcard cluster")
 		if err := p.cluster.Start(ctx); err != nil {
 			p.log.Error(err, "failed to start wildcard cluster")
